@@ -3,7 +3,7 @@
 use crate::actions::Actions;
 use crate::elements::{Element, Form};
 use crate::error;
-use crate::session::{Cmd, Session, Task};
+use crate::session::{Cmd, Session, SessionHandshakeResponse, Task};
 use crate::wait::Wait;
 use crate::wd::{
     Capabilities, Locator, NewWindowType, TimeoutConfiguration, WebDriverStatus, WindowHandle,
@@ -35,6 +35,7 @@ use crate::ClientBuilder;
 pub struct Client {
     pub(crate) tx: mpsc::UnboundedSender<Task>,
     pub(crate) is_legacy: bool,
+    pub(crate) handshake: SessionHandshakeResponse,
 }
 
 impl Client {
@@ -144,6 +145,13 @@ impl Client {
     pub async fn persist(&self) -> Result<(), error::CmdError> {
         self.issue(Cmd::Persist).await?;
         Ok(())
+    }
+
+    /// Accessor for the original handshake response
+    ///
+    /// This is useful in cases like WebDriver BiDi where you'd need the original response containing the `webSocketUrl` to connect to
+    pub fn get_session_handshake(&self) -> &SessionHandshakeResponse {
+        &self.handshake
     }
 }
 

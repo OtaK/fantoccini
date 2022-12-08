@@ -20,6 +20,8 @@ type Ack = oneshot::Sender<Result<Json, error::CmdError>>;
 
 type Wcmd = WebDriverCommand<webdriver::command::VoidWebDriverExtensionCommand>;
 
+pub type SessionHandshakeResponse = std::collections::HashMap<String, serde_json::Value>;
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum Cmd {
@@ -547,7 +549,7 @@ where
 
     fn map_handshake_response(
         response: Result<Json, error::CmdError>,
-    ) -> Result<(), error::NewSessionError> {
+    ) -> Result<SessionHandshakeResponse, error::NewSessionError> {
         match response {
             Ok(Json::Object(mut v)) => {
                 // TODO: not all impls are w3c compatible
@@ -556,7 +558,7 @@ where
                 // NOTE: remove so we can re-insert and return if something's wrong
                 if let Some(session_id) = v.remove("sessionId") {
                     if session_id.is_string() {
-                        return Ok(());
+                        return Ok(v.into_iter().collect());
                     }
                     v.insert("sessionId".to_string(), session_id);
                 }
@@ -583,9 +585,7 @@ where
                 serde_json::to_value(e)
                     .expect("error::WebDriver should always be serializeable to JSON"),
             )),
-            Err(e) => {
-                panic!("unexpected webdriver error; {}", e);
-            }
+            Err(e) => Err(error::NewSessionError::UnexpectedError(e)),
         }
     }
 
@@ -620,6 +620,7 @@ where
         let client = Client {
             tx: tx.clone(),
             is_legacy: false,
+            handshake: Default::default(),
         };
 
         // Create a new session for this client
@@ -648,9 +649,10 @@ where
             .map(Self::map_handshake_response)
             .await
         {
-            Ok(_) => Ok(Client {
+            Ok(handshake) => Ok(Client {
                 tx,
                 is_legacy: false,
+                handshake,
             }),
             Err(error::NewSessionError::NotW3C(json)) => {
                 // maybe try legacy mode?
@@ -689,7 +691,7 @@ where
                 let spec = webdriver::command::NewSessionParameters::Legacy(session_config);
 
                 // try again with a legacy client
-                client
+                let handshake = client
                     .issue(WebDriverCommand::NewSession(spec))
                     .map(Self::map_handshake_response)
                     .await?;
@@ -697,6 +699,7 @@ where
                 Ok(Client {
                     tx,
                     is_legacy: true,
+                    handshake,
                 })
             }
             Err(e) => Err(e),
